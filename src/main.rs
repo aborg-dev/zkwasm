@@ -52,8 +52,32 @@ impl ZkAssembler {
         self.add_instruction(&format!("$ => {} :ADD", register.name()));
     }
 
+    fn sub(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :SUB", register.name()));
+    }
+
+    fn and(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :AND", register.name()));
+    }
+
+    fn or(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :OR", register.name()));
+    }
+
+    fn xor(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :XOR", register.name()));
+    }
+
     fn eq(&mut self, register: Register) {
         self.add_instruction(&format!("$ => {} :EQ", register.name()));
+    }
+
+    fn unsigned_less_then(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :LT", register.name()));
+    }
+
+    fn signed_less_then(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :SLT", register.name()));
     }
 
     fn assert(&mut self, register: Register) {
@@ -395,7 +419,6 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     fn visit_i32_eq(&mut self) -> Self::Output {
         self.assembler.stack_pop(Register::A);
         self.assembler.stack_pop(Register::B);
-        // TODO: Store result directly into the stack.
         self.assembler.eq(Register::A);
         self.assembler.stack_push_register(Register::A);
     }
@@ -405,11 +428,17 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_lt_s(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        self.assembler.signed_less_then(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_lt_u(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        self.assembler.unsigned_less_then(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_gt_s(&mut self) -> Self::Output {
@@ -543,13 +572,15 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     fn visit_i32_add(&mut self) -> Self::Output {
         self.assembler.stack_pop(Register::A);
         self.assembler.stack_pop(Register::B);
-        // TODO: Store result directly into the stack.
         self.assembler.add(Register::A);
         self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_sub(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        self.assembler.sub(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_mul(&mut self) -> Self::Output {
@@ -573,15 +604,24 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_and(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        self.assembler.and(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_or(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        self.assembler.or(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_xor(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        self.assembler.xor(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_shl(&mut self) -> Self::Output {
