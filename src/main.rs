@@ -4,8 +4,70 @@ use anyhow::Result;
 
 use wasmparser::{BlockType, BrTable, Ieee32, Ieee64, MemArg, Payload::*};
 
-fn parse(module: &[u8]) -> Result<()> {
+struct ZkAssembler {
+    instructions: Vec<String>, 
+}
+
+enum Register {
+    A, B, C, D, E,
+}
+
+impl Register {
+    fn name(self) -> &'static str {
+        match self {
+            Register::A => "A",
+            Register::B => "B",
+            Register::C => "C",
+            Register::D => "D",
+            Register::E => "E",
+        }
+    }
+}
+
+impl ZkAssembler {
+    fn new() -> Self { Self { instructions: vec![] } }
+
+    fn label(&mut self, value: &str) {
+        self.instructions.push(format!("{value}:").to_string());
+    }
+
+    fn add_instruction(&mut self, instruction: &str) {
+        self.instructions.push(format!("\t{instruction}").to_string());
+    }
+
+    fn stack_push_const(&mut self, value: i32) {
+        self.add_instruction(&format!("{value} :MSTORE(SP++)"));
+    }
+
+    fn stack_push_register(&mut self, register: Register) {
+        self.add_instruction(&format!("{} :MSTORE(SP++)", register.name()));
+    }
+
+    fn stack_pop(&mut self, register: Register) {
+        self.add_instruction("SP - 1 => SP");
+        self.add_instruction(&format!("$ => {}: MLOAD(SP)", register.name()));
+    }
+
+    fn add(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :ADD", register.name()));
+    }
+
+    fn eq(&mut self, register: Register) {
+        self.add_instruction(&format!("$ => {} :EQ", register.name()));
+    }
+
+    fn assert(&mut self, register: Register) {
+        self.add_instruction(&format!("{} :ASSERT", register.name()));
+    }
+
+    fn finalize(self) -> String {
+        self.instructions.join("\n")
+    }
+}
+
+fn parse(module: &[u8]) -> Result<String> {
     let parser = wasmparser::Parser::new(0);
+    let mut program = String::new();
 
     for payload in parser.parse_all(module) {
         match payload? {
@@ -30,9 +92,14 @@ fn parse(module: &[u8]) -> Result<()> {
             // individually.
             CodeSectionStart { .. } => { /* ... */ }
             CodeSectionEntry(body) => {
-                // here we can iterate over `body` to parse the function
-                // and its locals
-                dbg!(body);
+                let assembler = ZkAssembler::new();
+                let mut visitor = ZkCodegenVisitor::new(assembler);
+                // TODO: Parse locals.
+                let mut reader = body.get_operators_reader()?;
+                while !reader.eof() {
+                    reader.visit_operator(&mut visitor)?;
+                }
+                program += &visitor.finalize();
             }
 
             // Sections for WebAssembly components
@@ -59,7 +126,13 @@ fn parse(module: &[u8]) -> Result<()> {
             End(_) => {}
         }
     }
-    Ok(())
+
+    program += "
+finalizeExecution:
+	${beforeLast()}  :JMPN(finalizeExecution)
+                     :JMP(start)";
+
+    Ok(program)
 }
 
 fn main() -> Result<()> {
@@ -68,7 +141,8 @@ fn main() -> Result<()> {
         anyhow::bail!("Usage: main WASM_FILEPATH");
     }
     let module = fs::read_to_string(&args[1]).expect("Failed to read file");
-    parse(module.as_bytes())?;
+    let program = parse(module.as_bytes())?;
+    fs::write("out.zkasm", program)?;
     Ok(())
 }
 
@@ -76,7 +150,7 @@ macro_rules! define_visit_once {
     (@mvp $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident) => {};
     (@$proposal:ident $op:ident $({ $($arg:ident: $argty:ty),* })? => $visit:ident) => {
         fn $visit(&mut self $($(,$arg: $argty)*)?) {
-            // do nothing for this example
+            panic!("Operator not implemented");
         }
     };
 }
@@ -91,7 +165,20 @@ macro_rules! define_visit_operator {
     }
 }
 
-pub struct ZkCodegenVisitor;
+pub struct ZkCodegenVisitor {
+    assembler: ZkAssembler,
+}
+
+impl ZkCodegenVisitor {
+    fn new(mut assembler: ZkAssembler) -> Self {
+        assembler.label("start");
+        Self { assembler }
+    }
+
+    fn finalize(self) -> String {
+        self.assembler.finalize()
+    }
+}
 
 impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     type Output = ();
@@ -123,7 +210,7 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_end(&mut self) -> Self::Output {
-        todo!()
+        // TODO: Do I need to do anything here?
     }
 
     fn visit_br(&mut self, _relative_depth: u32) -> Self::Output {
@@ -143,7 +230,9 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_call(&mut self, _function_index: u32) -> Self::Output {
-        todo!()
+        // TODO: Allow to call arbitrary functions.
+        self.assembler.stack_pop(Register::A);
+        self.assembler.assert(Register::A);
     }
 
     fn visit_call_indirect(
@@ -283,8 +372,8 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
         todo!()
     }
 
-    fn visit_i32_const(&mut self, _value: i32) -> Self::Output {
-        todo!()
+    fn visit_i32_const(&mut self, value: i32) -> Self::Output {
+        self.assembler.stack_push_const(value);
     }
 
     fn visit_i64_const(&mut self, _value: i64) -> Self::Output {
@@ -304,7 +393,11 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_eq(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        // TODO: Store result directly into the stack.
+        self.assembler.eq(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_ne(&mut self) -> Self::Output {
@@ -448,7 +541,11 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_add(&mut self) -> Self::Output {
-        todo!()
+        self.assembler.stack_pop(Register::A);
+        self.assembler.stack_pop(Register::B);
+        // TODO: Store result directly into the stack.
+        self.assembler.add(Register::A);
+        self.assembler.stack_push_register(Register::A);
     }
 
     fn visit_i32_sub(&mut self) -> Self::Output {

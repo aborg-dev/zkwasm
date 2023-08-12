@@ -7,4 +7,5 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.72"
+strum = "0.25.0"
 wasmparser = "0.110.0"
