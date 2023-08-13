@@ -9,8 +9,15 @@ fn main() -> Result<()> {
     if args.len() < 2 {
         anyhow::bail!("Usage: main WASM_FILEPATH");
     }
-    let module = fs::read_to_string(&args[1]).expect("Failed to read file");
+    let wasm_filepath = &args[1];
+    let module = fs::read_to_string(wasm_filepath).expect("Failed to read file");
     let program = codegen::parse(module.as_bytes())?;
-    fs::write("out.zkasm", program)?;
+    let output_filepath = format!(
+        "{}.zkasm",
+        wasm_filepath
+            .strip_suffix(".wasm")
+            .expect("expected extension .wasm")
+    );
+    fs::write(output_filepath, program)?;
     Ok(())
 }

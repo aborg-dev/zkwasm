@@ -1,0 +1,22 @@
+start:
+	2 :MSTORE(SP++)
+	3 :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	SP - 1 => SP
+	$ => B: MLOAD(SP)
+	$ => A :ADD
+	A :MSTORE(SP++)
+	5 :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	SP - 1 => SP
+	$ => B: MLOAD(SP)
+	$ => A :EQ
+	A :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	1 :ASSERT
+finalizeExecution:
+	${beforeLast()}  :JMPN(finalizeExecution)
+                     :JMP(start)
