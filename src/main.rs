@@ -84,6 +84,10 @@ impl ZkAssembler {
         self.add_instruction(&format!("{} :ASSERT", register.name()));
     }
 
+    fn assert_const(&mut self, value: i32) {
+        self.add_instruction(&format!("{value} :ASSERT"));
+    }
+
     fn finalize(self) -> String {
         self.instructions.join("\n")
     }
@@ -256,7 +260,7 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     fn visit_call(&mut self, _function_index: u32) -> Self::Output {
         // TODO: Allow to call arbitrary functions.
         self.assembler.stack_pop(Register::A);
-        self.assembler.assert(Register::A);
+        self.assembler.assert_const(1);
     }
 
     fn visit_call_indirect(
