@@ -20,3 +20,12 @@ You can check the execution (assertions) in the WASM file with:
 ```sh
 cargo run --bin runner data/add.wasm
 ```
+
+### Generating ZK ASM
+
+You can generate `.zkasm` file from WASM file with:
+```sh
+cargo run --bin zkwasm data/add.wasm
+```
+
+The result will be stored in `data/add.zkasm`.
