@@ -154,10 +154,34 @@ struct Local {
     ty: ValType,
 }
 
+enum BlockInstr {
+    Loop,
+    Block,
+    Function,
+}
+
+// TODO(akashin): Rename to something more precise.
+struct Block {
+    index: u32,
+    block_instr: BlockInstr,
+}
+
+impl Block {
+    fn label(&self) -> String {
+        match self.block_instr {
+            BlockInstr::Loop => format!("loop_{}", self.index),
+            BlockInstr::Block => format!("block_{}", self.index),
+            BlockInstr::Function => format!("function_{}", self.index),
+        }
+    }
+}
+
 struct ZkCodegenVisitor {
     assembler: ZkAssembler,
     locals: Vec<Local>,
     stack_depth: i32,
+    next_block_index: u32,
+    blocks: Vec<Block>,
 }
 
 impl ZkCodegenVisitor {
@@ -176,6 +200,11 @@ impl ZkCodegenVisitor {
             assembler,
             locals,
             stack_depth: 0,
+            next_block_index: 1,
+            blocks: vec![Block {
+                index: 0,
+                block_instr: BlockInstr::Function,
+            }],
         }
     }
 
@@ -305,11 +334,21 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_block(&mut self, _blockty: BlockType) -> Self::Output {
-        todo!()
+        self.blocks.push(Block {
+            index: self.next_block_index,
+            block_instr: BlockInstr::Block,
+        });
+        self.next_block_index += 1;
     }
 
     fn visit_loop(&mut self, _blockty: BlockType) -> Self::Output {
-        todo!()
+        let block = Block {
+            index: self.next_block_index,
+            block_instr: BlockInstr::Loop,
+        };
+        self.assembler.label(&format!("loop_{}", block.index));
+        self.blocks.push(block);
+        self.next_block_index += 1;
     }
 
     fn visit_if(&mut self, _blockty: BlockType) -> Self::Output {
@@ -321,15 +360,22 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_end(&mut self) -> Self::Output {
-        // TODO: Do I need to do anything here?
+        let block = self.blocks.pop().expect("No block to pop");
+        match block.block_instr {
+            BlockInstr::Block => self.assembler.label(&format!("block_{}", block.index)),
+            _ => {}
+        }
     }
 
-    fn visit_br(&mut self, _relative_depth: u32) -> Self::Output {
-        todo!()
+    fn visit_br(&mut self, relative_depth: u32) -> Self::Output {
+        let block = &self.blocks[(self.next_block_index - relative_depth - 1) as usize];
+        self.assembler.jump(&block.label());
     }
 
-    fn visit_br_if(&mut self, _relative_depth: u32) -> Self::Output {
-        todo!()
+    fn visit_br_if(&mut self, relative_depth: u32) -> Self::Output {
+        self.stack_pop(Register::A);
+        let block = &self.blocks[(self.next_block_index - relative_depth - 1) as usize];
+        self.assembler.jump_if_nonzero(Register::A, &block.label());
     }
 
     fn visit_br_table(&mut self, _targets: BrTable<'a>) -> Self::Output {
@@ -343,7 +389,8 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     fn visit_call(&mut self, _function_index: u32) -> Self::Output {
         // TODO: Allow to call arbitrary functions.
         self.stack_pop(Register::A);
-        self.assembler.assert_const(1);
+        self.stack_pop(Register::B);
+        self.assembler.assert(Register::B);
     }
 
     fn visit_call_indirect(
@@ -371,7 +418,8 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
 
         match local.location {
             Location::Stack(offset) => {
-                self.assembler.stack_get(Register::E, offset - self.stack_depth);
+                self.assembler
+                    .stack_get(Register::E, offset - self.stack_depth);
                 self.stack_push_register(Register::E);
             }
             Location::Register(register) => {
@@ -393,7 +441,8 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
         match location {
             Location::Stack(offset) => {
                 self.stack_pop(Register::E);
-                self.assembler.stack_set(Register::E, offset - self.stack_depth);
+                self.assembler
+                    .stack_set(Register::E, offset - self.stack_depth);
             }
             Location::Register(register) => {
                 self.stack_pop(register);

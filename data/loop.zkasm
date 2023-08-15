@@ -1,0 +1,43 @@
+start: 
+	0 :MSTORE(SP++)
+	SP - 1 => SP
+	$ => E: MLOAD(SP)
+	E :MSTORE(SP++)
+loop_2: 
+	$ => E :MLOAD(SP - 1)
+	E :MSTORE(SP++)
+	1 :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	SP - 1 => SP
+	$ => B: MLOAD(SP)
+	$ => A :ADD
+	A :MSTORE(SP++)
+	SP - 1 => SP
+	$ => E: MLOAD(SP)
+	E :MSTORE(SP - 1)
+	$ => E :MLOAD(SP - 1)
+	E :MSTORE(SP++)
+	10 :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	SP - 1 => SP
+	$ => B: MLOAD(SP)
+	$ => A :EQ
+	A :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	A :JMPNZ(block_1)
+	:JMP(loop_2)
+block_1: 
+	$ => E :MLOAD(SP - 1)
+	E :MSTORE(SP++)
+	10 :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	SP - 1 => SP
+	$ => B: MLOAD(SP)
+	B :ASSERT
+finalizeExecution:
+	${beforeLast()}  :JMPN(finalizeExecution)
+                     :JMP(start)
