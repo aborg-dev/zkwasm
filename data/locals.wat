@@ -1,0 +1,16 @@
+(module
+ (import "env" "assert" (func $assert (param i32)))
+ (func $main
+	(local $x i32)
+	(local $y i32)
+	(local $z i32)
+	(local.set $x (i32.const 2))
+	(local.set $y (i32.const 3))
+	(local.get $x)
+	(local.get $y)
+	(local.set $z (i32.add))
+	(local.get $z)
+	(i32.const 5)
+	(i32.eq)
+	call $assert)
+(start $main))

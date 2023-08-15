@@ -1,4 +1,6 @@
-use wasmparser::{BlockType, BrTable, Ieee32, Ieee64, MemArg, Payload::*};
+use std::collections::HashMap;
+
+use wasmparser::{BlockType, BrTable, Ieee32, Ieee64, MemArg, Payload::*, ValType};
 
 use anyhow::Result;
 
@@ -6,6 +8,7 @@ pub struct ZkAssembler {
     instructions: Vec<String>,
 }
 
+#[derive(PartialEq, Clone, Copy)]
 enum Register {
     A,
     B,
@@ -33,13 +36,25 @@ impl ZkAssembler {
         }
     }
 
-    fn label(&mut self, value: &str) {
-        self.instructions.push(format!("{value}:").to_string());
-    }
-
     fn add_instruction(&mut self, instruction: &str) {
         self.instructions
             .push(format!("\t{instruction}").to_string());
+    }
+
+    fn label(&mut self, value: &str) {
+        self.instructions.push(format!("{value}: ").to_string());
+    }
+
+    fn jump(&mut self, dst: &str) {
+        self.add_instruction(&format!(":JMP({dst})"));
+    }
+
+    fn jump_if_zero(&mut self, register: Register, dst: &str) {
+        self.add_instruction(&format!("{} :JMPZ({dst})", register.name()));
+    }
+
+    fn jump_if_nonzero(&mut self, register: Register, dst: &str) {
+        self.add_instruction(&format!("{} :JMPNZ({dst})", register.name()));
     }
 
     fn stack_push_const(&mut self, value: i32) {
@@ -53,6 +68,30 @@ impl ZkAssembler {
     fn stack_pop(&mut self, register: Register) {
         self.add_instruction("SP - 1 => SP");
         self.add_instruction(&format!("$ => {}: MLOAD(SP)", register.name()));
+    }
+
+    fn get_stack_address(offset: i32) -> String {
+        match offset.cmp(&0) {
+            std::cmp::Ordering::Less => format!("SP - {}", -offset),
+            std::cmp::Ordering::Equal => "SP".to_string(),
+            std::cmp::Ordering::Greater => format!("SP + {}", offset),
+        }
+    }
+
+    fn stack_set(&mut self, register: Register, offset: i32) {
+        self.add_instruction(&format!(
+            "{} :MSTORE({})",
+            register.name(),
+            ZkAssembler::get_stack_address(offset)
+        ));
+    }
+
+    fn stack_get(&mut self, register: Register, offset: i32) {
+        self.add_instruction(&format!(
+            "$ => {} :MLOAD({})",
+            register.name(),
+            ZkAssembler::get_stack_address(offset)
+        ));
     }
 
     fn add(&mut self, register: Register) {
@@ -100,14 +139,59 @@ impl ZkAssembler {
     }
 }
 
+#[derive(PartialEq, Clone, Copy)]
+enum Location {
+    // The local is in the stack with a given offset.
+    Stack(i32),
+    // The local is in a given register.
+    Register(Register),
+    // The local is not initialized.
+    Uninitialized,
+}
+
+struct Local {
+    location: Location,
+    ty: ValType,
+}
+
 struct ZkCodegenVisitor {
     assembler: ZkAssembler,
+    locals: Vec<Local>,
+    stack_depth: i32,
 }
 
 impl ZkCodegenVisitor {
-    fn new(mut assembler: ZkAssembler) -> Self {
+    fn new(mut assembler: ZkAssembler, local_counts: Vec<(u32, ValType)>) -> Self {
         assembler.label("start");
-        Self { assembler }
+        let mut locals = Vec::new();
+        for (count, ty) in local_counts {
+            for _ in 0..count {
+                locals.push(Local {
+                    location: Location::Uninitialized,
+                    ty,
+                });
+            }
+        }
+        Self {
+            assembler,
+            locals,
+            stack_depth: 0,
+        }
+    }
+
+    fn stack_pop(&mut self, dst: Register) {
+        self.assembler.stack_pop(dst);
+        self.stack_depth -= 1;
+    }
+
+    fn stack_push_register(&mut self, src: Register) {
+        self.assembler.stack_push_register(src);
+        self.stack_depth += 1;
+    }
+
+    fn stack_push_const(&mut self, value: i32) {
+        self.assembler.stack_push_const(value);
+        self.stack_depth += 1;
     }
 
     fn finalize(self) -> String {
@@ -142,12 +226,15 @@ pub fn parse(module: &[u8]) -> Result<String> {
             // individually.
             CodeSectionStart { .. } => { /* ... */ }
             CodeSectionEntry(body) => {
+                let mut locals = Vec::new();
+                for local in body.get_locals_reader()? {
+                    locals.push(local?);
+                }
                 let assembler = ZkAssembler::new();
-                let mut visitor = ZkCodegenVisitor::new(assembler);
-                // TODO: Parse locals.
-                let mut reader = body.get_operators_reader()?;
-                while !reader.eof() {
-                    reader.visit_operator(&mut visitor)?;
+                let mut visitor = ZkCodegenVisitor::new(assembler, locals);
+                let mut operator_reader = body.get_operators_reader()?;
+                while !operator_reader.eof() {
+                    operator_reader.visit_operator(&mut visitor)?;
                 }
                 program += &visitor.finalize();
             }
@@ -255,7 +342,7 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
 
     fn visit_call(&mut self, _function_index: u32) -> Self::Output {
         // TODO: Allow to call arbitrary functions.
-        self.assembler.stack_pop(Register::A);
+        self.stack_pop(Register::A);
         self.assembler.assert_const(1);
     }
 
@@ -276,12 +363,47 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
         todo!()
     }
 
-    fn visit_local_get(&mut self, _local_index: u32) -> Self::Output {
-        todo!()
+    fn visit_local_get(&mut self, local_index: u32) -> Self::Output {
+        let local = self
+            .locals
+            .get_mut(local_index as usize)
+            .expect(&format!("Can't find local {}", local_index));
+
+        match local.location {
+            Location::Stack(offset) => {
+                self.assembler.stack_get(Register::E, offset - self.stack_depth);
+                self.stack_push_register(Register::E);
+            }
+            Location::Register(register) => {
+                self.stack_push_register(register);
+            }
+            Location::Uninitialized => {
+                panic!("Local {local_index} is not initialized");
+            }
+        }
     }
 
-    fn visit_local_set(&mut self, _local_index: u32) -> Self::Output {
-        todo!()
+    fn visit_local_set(&mut self, local_index: u32) -> Self::Output {
+        let location = self
+            .locals
+            .get(local_index as usize)
+            .expect(&format!("Can't find local {}", local_index))
+            .location;
+
+        match location {
+            Location::Stack(offset) => {
+                self.stack_pop(Register::E);
+                self.assembler.stack_set(Register::E, offset - self.stack_depth);
+            }
+            Location::Register(register) => {
+                self.stack_pop(register);
+            }
+            Location::Uninitialized => {
+                self.stack_pop(Register::E);
+                self.locals[local_index as usize].location = Location::Stack(self.stack_depth);
+                self.stack_push_register(Register::E);
+            }
+        }
     }
 
     fn visit_local_tee(&mut self, _local_index: u32) -> Self::Output {
@@ -397,7 +519,7 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_const(&mut self, value: i32) -> Self::Output {
-        self.assembler.stack_push_const(value);
+        self.stack_push_const(value);
     }
 
     fn visit_i64_const(&mut self, _value: i64) -> Self::Output {
@@ -417,10 +539,10 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_eq(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.eq(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_ne(&mut self) -> Self::Output {
@@ -428,17 +550,17 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_lt_s(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.signed_less_then(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_lt_u(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.unsigned_less_then(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_gt_s(&mut self) -> Self::Output {
@@ -570,17 +692,17 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_add(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.add(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_sub(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.sub(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_mul(&mut self) -> Self::Output {
@@ -604,24 +726,24 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_i32_and(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.and(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_or(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.or(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_xor(&mut self) -> Self::Output {
-        self.assembler.stack_pop(Register::A);
-        self.assembler.stack_pop(Register::B);
+        self.stack_pop(Register::A);
+        self.stack_pop(Register::B);
         self.assembler.xor(Register::A);
-        self.assembler.stack_push_register(Register::A);
+        self.stack_push_register(Register::A);
     }
 
     fn visit_i32_shl(&mut self) -> Self::Output {
