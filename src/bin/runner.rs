@@ -21,9 +21,7 @@ fn main() -> Result<()> {
 
     let mut linker = <Linker<HostState>>::new(&engine);
     linker.define("env", "assert", host_assert)?;
-    let _ = linker
-        .instantiate(&mut store, &module)?
-        .start(&mut store)?;
+    let _ = linker.instantiate(&mut store, &module)?.start(&mut store)?;
 
     Ok(())
 }
