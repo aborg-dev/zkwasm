@@ -7,11 +7,12 @@ edition = "2021"
 
 [dependencies]
 anyhow = "1.0.72"
+expect-test = "1.4.1"
 strum = "0.25.0"
 wasmi = "0.31.0"
 wasmparser = "0.110.0"
 wat = "1.0.69"
 
-[[bin]]
-name = "runner"
-test = false
+[lib]
+name = "zkwasm"
+path = "src/lib.rs"

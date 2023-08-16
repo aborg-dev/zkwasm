@@ -2,7 +2,7 @@ use std::{env, fs};
 
 use anyhow::Result;
 
-mod codegen;
+use zkwasm::codegen;
 
 fn main() -> Result<()> {
     let args: Vec<String> = env::args().collect();
