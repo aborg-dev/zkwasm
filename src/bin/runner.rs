@@ -15,9 +15,12 @@ fn main() -> Result<()> {
 
     type HostState = ();
     let mut store = Store::new(&engine, ());
-    let host_assert = Func::wrap(&mut store, |_caller: Caller<'_, HostState>, lhs: i32, rhs: i32| {
-        assert_eq!(lhs, rhs);
-    });
+    let host_assert = Func::wrap(
+        &mut store,
+        |_caller: Caller<'_, HostState>, lhs: i32, rhs: i32| {
+            assert_eq!(lhs, rhs);
+        },
+    );
 
     let mut linker = <Linker<HostState>>::new(&engine);
     linker.define("env", "assert_eq", host_assert)?;

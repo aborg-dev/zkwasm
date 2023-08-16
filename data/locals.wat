@@ -1,5 +1,5 @@
 (module
- (import "env" "assert" (func $assert (param i32)))
+ (import "env" "assert_eq" (func $assert_eq (param i32) (param i32)))
  (func $main
 	(local $x i32)
 	(local $y i32)
@@ -11,6 +11,5 @@
 	(local.set $z (i32.add))
 	(local.get $z)
 	(i32.const 5)
-	(i32.eq)
-	call $assert)
+	call $assert_eq)
 (start $main))

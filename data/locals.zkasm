@@ -27,11 +27,7 @@ start:
 	$ => A: MLOAD(SP)
 	SP - 1 => SP
 	$ => B: MLOAD(SP)
-	$ => A :EQ
-	A :MSTORE(SP++)
-	SP - 1 => SP
-	$ => A: MLOAD(SP)
-	1 :ASSERT
+	B :ASSERT
 finalizeExecution:
 	${beforeLast()}  :JMPN(finalizeExecution)
                      :JMP(start)
