@@ -10,7 +10,7 @@ fn main() -> Result<()> {
         anyhow::bail!("Usage: main WASM_FILEPATH");
     }
     let wasm_filepath = &args[1];
-    let module = fs::read(wasm_filepath).expect(&format!("Failed to read file {wasm_filepath}"));
+    let module = fs::read(wasm_filepath)?;
     let program = codegen::parse(&module)?;
     let output_filepath = format!(
         "{}.zkasm",

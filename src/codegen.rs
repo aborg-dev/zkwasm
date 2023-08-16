@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use wasmparser::{BlockType, BrTable, Ieee32, Ieee64, MemArg, Payload::*, ValType};
 
 use anyhow::Result;
@@ -8,6 +6,7 @@ pub struct ZkAssembler {
     instructions: Vec<String>,
 }
 
+#[allow(dead_code)]
 #[derive(PartialEq, Clone, Copy)]
 enum Register {
     A,
@@ -49,6 +48,7 @@ impl ZkAssembler {
         self.add_instruction(&format!(":JMP({dst})"));
     }
 
+    #[allow(dead_code)]
     fn jump_if_zero(&mut self, register: Register, dst: &str) {
         self.add_instruction(&format!("{} :JMPZ({dst})", register.name()));
     }
@@ -130,6 +130,7 @@ impl ZkAssembler {
         self.add_instruction(&format!("{} :ASSERT", register.name()));
     }
 
+    #[allow(dead_code)]
     fn assert_const(&mut self, value: i32) {
         self.add_instruction(&format!("{value} :ASSERT"));
     }
@@ -144,6 +145,7 @@ enum Location {
     // The local is in the stack with a given offset.
     Stack(i32),
     // The local is in a given register.
+    #[allow(dead_code)]
     Register(Register),
     // The local is not initialized.
     Uninitialized,
@@ -151,6 +153,7 @@ enum Location {
 
 struct Local {
     location: Location,
+    #[allow(dead_code)]
     ty: ValType,
 }
 
@@ -361,9 +364,8 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
 
     fn visit_end(&mut self) -> Self::Output {
         let block = self.blocks.pop().expect("No block to pop");
-        match block.block_instr {
-            BlockInstr::Block => self.assembler.label(&format!("block_{}", block.index)),
-            _ => {}
+        if let BlockInstr::Block = block.block_instr {
+            self.assembler.label(&format!("block_{}", block.index))
         }
     }
 
@@ -411,12 +413,13 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
     }
 
     fn visit_local_get(&mut self, local_index: u32) -> Self::Output {
-        let local = self
+        let location = self
             .locals
             .get_mut(local_index as usize)
-            .expect(&format!("Can't find local {}", local_index));
+            .unwrap_or_else(|| panic!("Can't find local {}", local_index))
+            .location;
 
-        match local.location {
+        match location {
             Location::Stack(offset) => {
                 self.assembler
                     .stack_get(Register::E, offset - self.stack_depth);
@@ -435,7 +438,7 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
         let location = self
             .locals
             .get(local_index as usize)
-            .expect(&format!("Can't find local {}", local_index))
+            .unwrap_or_else(|| panic!("Can't find local {}", local_index))
             .location;
 
         match location {
