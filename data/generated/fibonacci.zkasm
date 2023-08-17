@@ -1,4 +1,6 @@
-start: 
+start:
+	:JMP(function_1)
+function_1:
 	0 :MSTORE(SP++)
 	SP - 1 => SP
 	$ => E: MLOAD(SP)
@@ -11,7 +13,7 @@ start:
 	SP - 1 => SP
 	$ => E: MLOAD(SP)
 	E :MSTORE(SP++)
-loop_2: 
+loop_2:
 	$ => E :MLOAD(SP - 2)
 	E :MSTORE(SP++)
 	$ => E :MLOAD(SP - 2)
@@ -55,7 +57,7 @@ loop_2:
 	$ => A: MLOAD(SP)
 	A :JMPNZ(block_1)
 	:JMP(loop_2)
-block_1: 
+block_1:
 	$ => E :MLOAD(SP - 1)
 	E :MSTORE(SP++)
 	89 :MSTORE(SP++)

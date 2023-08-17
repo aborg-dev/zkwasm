@@ -1,4 +1,6 @@
-start: 
+start:
+	:JMP(function_1)
+function_1:
 	2 :MSTORE(SP++)
 	3 :MSTORE(SP++)
 	SP - 1 => SP

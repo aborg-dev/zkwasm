@@ -41,7 +41,7 @@ impl ZkAssembler {
     }
 
     fn label(&mut self, value: &str) {
-        self.instructions.push(format!("{value}: ").to_string());
+        self.instructions.push(format!("{value}:").to_string());
     }
 
     fn jump(&mut self, dst: &str) {
@@ -188,8 +188,7 @@ struct ZkCodegenVisitor {
 }
 
 impl ZkCodegenVisitor {
-    fn new(mut assembler: ZkAssembler, local_counts: Vec<(u32, ValType)>) -> Self {
-        assembler.label("start");
+    fn new(assembler: ZkAssembler, local_counts: Vec<(u32, ValType)>, function_index: u32) -> Self {
         let mut locals = Vec::new();
         for (count, ty) in local_counts {
             for _ in 0..count {
@@ -199,16 +198,23 @@ impl ZkCodegenVisitor {
                 });
             }
         }
-        Self {
+        let mut visitor = Self {
             assembler,
             locals,
             stack_depth: 0,
             next_block_index: 1,
-            blocks: vec![Block {
-                index: 0,
-                block_instr: BlockInstr::Function,
-            }],
-        }
+            blocks: vec![],
+        };
+
+        // Label for function start.
+        let block = Block {
+            index: function_index,
+            block_instr: BlockInstr::Function,
+        };
+        visitor.assembler.label(&block.label());
+        visitor.blocks.push(block);
+
+        visitor
     }
 
     fn stack_pop(&mut self, dst: Register) {
@@ -234,20 +240,38 @@ impl ZkCodegenVisitor {
 pub fn parse(module: &[u8]) -> Result<String> {
     let parser = wasmparser::Parser::new(0);
     let mut program = String::new();
+    let mut current_function_index = 0u32;
 
     for payload in parser.parse_all(module) {
         match payload? {
             // Sections for WebAssembly modules
             Version { .. } => { /* ... */ }
             TypeSection(_) => { /* ... */ }
-            ImportSection(_) => { /* ... */ }
+            ImportSection(reader) => {
+                for import in reader.into_iter() {
+                    let import = import?;
+                    match import.ty {
+                        wasmparser::TypeRef::Func(_) => {
+                            // TODO: Remember which function corresponds to an ASSERT.
+                            current_function_index += 1;
+                        },
+                        _ => {}
+                    }
+                }
+            }
             FunctionSection(_) => { /* ... */ }
             TableSection(_) => { /* ... */ }
             MemorySection(_) => { /* ... */ }
             TagSection(_) => { /* ... */ }
             GlobalSection(_) => { /* ... */ }
             ExportSection(_) => { /* ... */ }
-            StartSection { .. } => { /* ... */ }
+            StartSection { func, .. } => {
+                let mut assembler = ZkAssembler::new();
+                assembler.label("start");
+                assembler.jump(&format!("function_{}", func));
+                program += &assembler.finalize();
+                program += "\n";
+            }
             ElementSection(_) => { /* ... */ }
             DataCountSection { .. } => { /* ... */ }
             DataSection(_) => { /* ... */ }
@@ -263,12 +287,13 @@ pub fn parse(module: &[u8]) -> Result<String> {
                     locals.push(local?);
                 }
                 let assembler = ZkAssembler::new();
-                let mut visitor = ZkCodegenVisitor::new(assembler, locals);
+                let mut visitor = ZkCodegenVisitor::new(assembler, locals, current_function_index);
                 let mut operator_reader = body.get_operators_reader()?;
                 while !operator_reader.eof() {
                     operator_reader.visit_operator(&mut visitor)?;
                 }
                 program += &visitor.finalize();
+                current_function_index += 1;
             }
 
             // Sections for WebAssembly components
@@ -349,7 +374,7 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
             index: self.next_block_index,
             block_instr: BlockInstr::Loop,
         };
-        self.assembler.label(&format!("loop_{}", block.index));
+        self.assembler.label(&block.label());
         self.blocks.push(block);
         self.next_block_index += 1;
     }
