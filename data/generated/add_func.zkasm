@@ -1,0 +1,26 @@
+start:
+	:JMP(function_1)
+function_1:
+	2 :MSTORE(SP++)
+	3 :MSTORE(SP++)
+	:CALL(function_2)
+	5 :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	SP - 1 => SP
+	$ => B: MLOAD(SP)
+	B :ASSERT
+function_2:
+	$ => E :MLOAD(SP)
+	E :MSTORE(SP++)
+	$ => E :MLOAD(SP)
+	E :MSTORE(SP++)
+	SP - 1 => SP
+	$ => A: MLOAD(SP)
+	SP - 1 => SP
+	$ => B: MLOAD(SP)
+	$ => A :ADD
+	A :MSTORE(SP++)
+finalizeExecution:
+	${beforeLast()}  :JMPN(finalizeExecution)
+                     :JMP(start)

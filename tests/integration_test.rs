@@ -47,5 +47,6 @@ mod tests {
         locals_simple,
         counter,
         fibonacci,
+        add_func,
     }
 }

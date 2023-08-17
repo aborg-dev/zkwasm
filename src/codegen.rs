@@ -53,6 +53,10 @@ impl ZkAssembler {
         self.add_instruction(&format!("{} :JMPZ({dst})", register.name()));
     }
 
+    fn call(&mut self, dst: &str) {
+        self.add_instruction(&format!(":CALL({dst})"));
+    }
+
     fn jump_if_nonzero(&mut self, register: Register, dst: &str) {
         self.add_instruction(&format!("{} :JMPNZ({dst})", register.name()));
     }
@@ -188,8 +192,14 @@ struct ZkCodegenVisitor {
 }
 
 impl ZkCodegenVisitor {
-    fn new(assembler: ZkAssembler, local_counts: Vec<(u32, ValType)>, function_index: u32) -> Self {
+    fn new(assembler: ZkAssembler, local_counts: Vec<(u32, ValType)>, params: Vec<ValType>, function_index: u32) -> Self {
         let mut locals = Vec::new();
+        for (index, ty) in params.iter().enumerate() {
+            locals.push(Local {
+                location: Location::Stack(index as i32),
+                ty: ty.clone(),
+            });
+        }
         for (count, ty) in local_counts {
             for _ in 0..count {
                 locals.push(Local {
@@ -241,12 +251,18 @@ pub fn parse(module: &[u8]) -> Result<String> {
     let parser = wasmparser::Parser::new(0);
     let mut program = String::new();
     let mut current_function_index = 0u32;
+    let mut types = Vec::new();
 
     for payload in parser.parse_all(module) {
         match payload? {
             // Sections for WebAssembly modules
             Version { .. } => { /* ... */ }
-            TypeSection(_) => { /* ... */ }
+            TypeSection(reader) => {
+                for ty in reader {
+                    let ty = ty?;
+                    types.push(ty);
+                }
+            }
             ImportSection(reader) => {
                 for import in reader.into_iter() {
                     let import = import?;
@@ -254,12 +270,17 @@ pub fn parse(module: &[u8]) -> Result<String> {
                         wasmparser::TypeRef::Func(_) => {
                             // TODO: Remember which function corresponds to an ASSERT.
                             current_function_index += 1;
-                        },
+                        }
                         _ => {}
                     }
                 }
             }
-            FunctionSection(_) => { /* ... */ }
+            FunctionSection(reader) => {
+                for func in reader.into_iter() {
+                    let func = func?;
+                    dbg!(func);
+                }
+            }
             TableSection(_) => { /* ... */ }
             MemorySection(_) => { /* ... */ }
             TagSection(_) => { /* ... */ }
@@ -286,13 +307,22 @@ pub fn parse(module: &[u8]) -> Result<String> {
                 for local in body.get_locals_reader()? {
                     locals.push(local?);
                 }
+                let params: Vec<ValType> = match &types
+                    .get(current_function_index as usize)
+                    .unwrap()
+                    .structural_type
+                {
+                    wasmparser::StructuralType::Func(func) => func.params().to_vec(),
+                    _ => Vec::new(),
+                };
                 let assembler = ZkAssembler::new();
-                let mut visitor = ZkCodegenVisitor::new(assembler, locals, current_function_index);
+                let mut visitor = ZkCodegenVisitor::new(assembler, locals, params, current_function_index);
                 let mut operator_reader = body.get_operators_reader()?;
                 while !operator_reader.eof() {
                     operator_reader.visit_operator(&mut visitor)?;
                 }
                 program += &visitor.finalize();
+                program += "\n";
                 current_function_index += 1;
             }
 
@@ -321,7 +351,7 @@ pub fn parse(module: &[u8]) -> Result<String> {
         }
     }
 
-    program += "
+    program += "\
 finalizeExecution:
 	${beforeLast()}  :JMPN(finalizeExecution)
                      :JMP(start)";
@@ -413,11 +443,16 @@ impl<'a> wasmparser::VisitOperator<'a> for ZkCodegenVisitor {
         todo!()
     }
 
-    fn visit_call(&mut self, _function_index: u32) -> Self::Output {
-        // TODO: Allow to call arbitrary functions.
-        self.stack_pop(Register::A);
-        self.stack_pop(Register::B);
-        self.assembler.assert(Register::B);
+    fn visit_call(&mut self, function_index: u32) -> Self::Output {
+        // TODO: Replace this with a table lookup.
+        if function_index == 0 {
+            self.stack_pop(Register::A);
+            self.stack_pop(Register::B);
+            self.assembler.assert(Register::B);
+            return;
+        }
+        // TODO: Also need to switch the stack frame to new function.
+        self.assembler.call(&format!("function_{function_index}"));
     }
 
     fn visit_call_indirect(
